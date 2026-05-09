@@ -219,6 +219,13 @@ class AttendanceService {
       'Time': new Date(a.timestamp).toLocaleString()
     }));
   }
+
+  // Clear all data (Danger Zone)
+  clearAllData(): void {
+    localStorage.removeItem(SESSIONS_KEY);
+    localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    this.notifyListeners();
+  }
 }
 
 export const attendanceService = new AttendanceService();

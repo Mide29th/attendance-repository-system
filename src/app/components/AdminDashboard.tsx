@@ -22,7 +22,8 @@ import {
   ChevronLeft,
   FileText,
   Table as TableIcon,
-  FileSpreadsheet
+  FileSpreadsheet,
+  AlertTriangle
 } from 'lucide-react';
 
 export function AdminDashboard() {
@@ -221,6 +222,19 @@ export function AdminDashboard() {
     doc.save(`${session.name.replace(/\s+/g, '_')}_${timestamp}.pdf`);
   };
 
+  const handleClearAllData = () => {
+    const confirmed = window.confirm('CRITICAL WARNING: This will permanently delete ALL sessions and ALL attendee records from your device. This action CANNOT be undone.\n\nAre you absolutely sure you want to wipe the system?');
+    
+    if (confirmed) {
+      const doubleCheck = window.confirm('LAST CHANCE: Are you really sure? Everything will be lost.');
+      if (doubleCheck) {
+        attendanceService.clearAllData();
+        setSelectedSession(null);
+        alert('Database cleared successfully.');
+      }
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -277,7 +291,16 @@ export function AdminDashboard() {
               <Circle className={`w-2 h-2 fill-current ${isOnline ? 'animate-pulse' : ''}`} />
               {isOnline ? 'Live Network' : 'Offline Mode'}
             </div>
-            <button onClick={() => setIsAuthenticated(false)} className="text-xs text-muted-foreground hover:text-foreground">Logout</button>
+            <button 
+              onClick={handleClearAllData}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold text-destructive hover:bg-destructive/10 transition-colors border border-transparent hover:border-destructive/20"
+              title="Wipe All Data"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              Clear System
+            </button>
+            <div className="w-[1px] h-4 bg-border mx-1" />
+            <button onClick={() => setIsAuthenticated(false)} className="text-xs text-muted-foreground hover:text-foreground font-medium">Logout</button>
           </div>
         </div>
       </header>
