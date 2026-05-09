@@ -226,6 +226,16 @@ class AttendanceService {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
     this.notifyListeners();
   }
+
+  // Delete specific attendee from a session
+  deleteAttendee(sessionId: string, attendeeId: string): void {
+    const sessions = this.getSessions();
+    const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+    if (sessionIndex !== -1) {
+      sessions[sessionIndex].attendees = sessions[sessionIndex].attendees.filter(a => a.id !== attendeeId);
+      this.saveSessions(sessions);
+    }
+  }
 }
 
 export const attendanceService = new AttendanceService();

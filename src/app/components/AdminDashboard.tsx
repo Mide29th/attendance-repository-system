@@ -23,7 +23,8 @@ import {
   FileText,
   Table as TableIcon,
   FileSpreadsheet,
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from 'lucide-react';
 
 export function AdminDashboard() {
@@ -232,6 +233,14 @@ export function AdminDashboard() {
         setSelectedSession(null);
         alert('Database cleared successfully.');
       }
+    }
+  };
+
+  const handleDeleteAttendee = (attendeeId: string) => {
+    if (!selectedSession) return;
+    if (confirm('Are you sure you want to delete this record?')) {
+      attendanceService.deleteAttendee(selectedSession.id, attendeeId);
+      // Data will refresh via the subscription
     }
   };
 
@@ -754,11 +763,12 @@ export function AdminDashboard() {
                             <th className="px-5 py-3 text-xs font-bold text-muted-foreground uppercase">Role/Details</th>
                             <th className="px-5 py-3 text-xs font-bold text-muted-foreground uppercase">Time</th>
                             <th className="px-5 py-3 text-xs font-bold text-muted-foreground uppercase">ID</th>
+                            <th className="px-5 py-3 text-xs font-bold text-muted-foreground uppercase text-right">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
                           {selectedSession.attendees.map((a, i) => (
-                            <tr key={a.id} className="hover:bg-muted/30 transition-colors">
+                            <tr key={a.id} className="hover:bg-muted/30 transition-colors group/row">
                               <td className="px-5 py-4 text-sm font-medium">{i + 1}</td>
                               <td className="px-5 py-4 font-bold">{a.name}</td>
                               <td className="px-5 py-4">
@@ -780,6 +790,15 @@ export function AdminDashboard() {
                                 {new Date(a.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </td>
                               <td className="px-5 py-4 text-xs font-mono text-muted-foreground">{a.idNumber}</td>
+                              <td className="px-5 py-4 text-right">
+                                <button 
+                                  onClick={() => handleDeleteAttendee(a.id)}
+                                  className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors opacity-0 group-hover/row:opacity-100"
+                                  title="Delete Record"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
