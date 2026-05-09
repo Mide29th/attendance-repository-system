@@ -78,7 +78,7 @@ export function AdminDashboard() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'admin123') { // Simple password as requested
+    if (password === 'Test123') { // Simple password as requested
       setIsAuthenticated(true);
     } else {
       alert('Incorrect password');

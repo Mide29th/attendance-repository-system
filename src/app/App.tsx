@@ -18,7 +18,7 @@ export default function App() {
         <Route path="/directory" element={<ExhibitorDirectory />} />
         
         {/* Default Route */}
-        <Route path="/" element={<Navigate to="/directory" replace />} />
+        <Route path="/" element={<Navigate to="/checkin" replace />} />
       </Routes>
     </div>
   );

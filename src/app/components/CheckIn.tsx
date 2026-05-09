@@ -2,7 +2,21 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router';
 import { attendanceService } from '../services/attendanceService';
 import { UserRole, SessionData } from '../types';
-import { CheckCircle2, UserCircle, Hash, Store, LayoutGrid, Info } from 'lucide-react';
+import { CheckCircle2, UserCircle, Hash, Store, LayoutGrid, Info, Copy, Check } from 'lucide-react';
+
+
+// Roles whose IDs are system-generated (not entered by user)
+const AUTO_ID_ROLES: UserRole[] = ['exhibitor', 'attendee'];
+
+function generateId(role: UserRole): string {
+  const prefix = role === 'exhibitor' ? 'EXH' : 'REG';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusable chars
+  let suffix = '';
+  for (let i = 0; i < 6; i++) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `${prefix}-${suffix}`;
+}
 
 
 export function CheckIn() {
@@ -15,22 +29,37 @@ export function CheckIn() {
   const [role, setRole] = useState<UserRole>('attendee');
   const [status, setStatus] = useState<'idle' | 'success' | 'duplicate' | 'error' | 'invalid_session'>('idle');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [generatedId, setGeneratedId] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  // Whether current role gets an auto-generated ID
+  const isAutoId = AUTO_ID_ROLES.includes(role);
 
   useEffect(() => {
     if (sessionId) {
+      // Load the specific session from the URL
       const activeSession = attendanceService.getSession(sessionId);
       if (activeSession) {
         setSession(activeSession);
-        // Set default role to the first allowed role
         if (activeSession.formConfig.allowedRoles.length > 0) {
           setRole(activeSession.formConfig.allowedRoles[0]);
         }
       } else {
         setStatus('invalid_session');
       }
+    } else {
+      // No sessionId in URL — auto-load the first active session
+      const allSessions = attendanceService.getSessions();
+      const activeSession = allSessions.find(s => s.isActive);
+      if (activeSession) {
+        setSession(activeSession);
+        if (activeSession.formConfig.allowedRoles.length > 0) {
+          setRole(activeSession.formConfig.allowedRoles[0]);
+        }
+      }
+      // If no sessions exist yet, the form still renders as General Check-In
     }
   }, [sessionId]);
-
 
 
   const categories = [
@@ -54,29 +83,27 @@ export function CheckIn() {
     setIsSubmitting(true);
 
     // Simulate brief loading
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 400));
+
+    // Auto-generate ID for exhibitor and attendee roles
+    const finalId = isAutoId ? generateId(role) : idNumber.trim();
 
     const success = attendanceService.addAttendee(
-      sessionId || 'default',
-      name.trim(), 
-      role, 
-      idNumber.trim(),
+      sessionId || session?.id || 'default',
+      name.trim(),
+      role,
+      finalId,
       role === 'exhibitor' ? boothNumber.trim() : undefined,
       role === 'exhibitor' ? category.trim() : undefined
     );
 
-
     if (success) {
+      if (isAutoId) setGeneratedId(finalId);
       setStatus('success');
       setName('');
       setIdNumber('');
       setBoothNumber('');
       setCategory('');
-
-      // Reset success message after 3 seconds
-      setTimeout(() => {
-        setStatus('idle');
-      }, 3000);
     } else {
       setStatus('duplicate');
       setTimeout(() => {
@@ -85,6 +112,19 @@ export function CheckIn() {
     }
 
     setIsSubmitting(false);
+  };
+
+  const handleCopyId = () => {
+    navigator.clipboard.writeText(generatedId).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleRegisterAnother = () => {
+    setStatus('idle');
+    setGeneratedId('');
+    setCopied(false);
   };
 
   if (status === 'success') {
@@ -96,8 +136,41 @@ export function CheckIn() {
               <CheckCircle2 className="w-12 h-12 text-green-600" />
             </div>
           </div>
-          <h1 className="text-2xl mb-2">Checked In Successfully!</h1>
-          <p className="text-muted-foreground">Thank you for attending</p>
+          <h1 className="text-2xl font-bold mb-1">
+            {isAutoId ? 'Registered Successfully!' : 'Checked In Successfully!'}
+          </h1>
+          <p className="text-muted-foreground mb-6">Thank you for attending</p>
+
+          {/* Generated ID display */}
+          {generatedId && (
+            <div className="bg-muted rounded-xl p-5 mb-6">
+              <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider mb-2">
+                Your {role === 'exhibitor' ? 'Exhibition' : 'Registration'} ID
+              </p>
+              <div className="flex items-center justify-center gap-3">
+                <code className="text-2xl font-bold tracking-widest text-primary font-mono">
+                  {generatedId}
+                </code>
+                <button
+                  onClick={handleCopyId}
+                  title="Copy ID"
+                  className="p-2 rounded-lg hover:bg-primary/10 transition-colors text-muted-foreground hover:text-primary"
+                >
+                  {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                Please save this ID — you'll need it for future reference.
+              </p>
+            </div>
+          )}
+
+          <button
+            onClick={handleRegisterAnother}
+            className="w-full bg-primary text-primary-foreground py-3 rounded-lg font-bold hover:opacity-90 transition-opacity"
+          >
+            Register Another Person
+          </button>
         </div>
       </div>
     );
@@ -150,7 +223,7 @@ export function CheckIn() {
 
           {/* Name Input */}
           <div>
-            <label className="block mb-2">Name</label>
+            <label className="block mb-2 font-bold text-sm">Full Name</label>
             <div className="relative">
               <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
               <input
@@ -158,19 +231,17 @@ export function CheckIn() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Enter your full name"
-                className="w-full pl-10 pr-4 py-3 bg-input-background rounded-lg outline-none focus:ring-2 focus:ring-ring"
+                className="w-full pl-10 pr-4 py-3 bg-muted/50 rounded-lg outline-none focus:ring-2 focus:ring-primary border border-transparent focus:border-primary transition-all"
                 required
               />
             </div>
           </div>
 
-          {/* ID Number Input */}
-          {(!session || session.formConfig.requireIdNumber) && (
+          {/* ID Number Input — only for roles that need manual entry */}
+          {(!session || session.formConfig.requireIdNumber) && !isAutoId && (
             <div>
               <label className="block mb-2 font-bold text-sm">
-                {role === 'student' ? 'Matric Number' : 
-                 role === 'lecturer' ? 'Lecturer ID' : 
-                 role === 'exhibitor' ? 'Exhibition ID' : 'Registration ID'}
+                {role === 'student' ? 'Matric Number' : 'Lecturer ID'}
               </label>
               <div className="relative">
                 <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -178,11 +249,23 @@ export function CheckIn() {
                   type="text"
                   value={idNumber}
                   onChange={(e) => setIdNumber(e.target.value)}
-                  placeholder="Enter unique ID"
+                  placeholder="Enter your unique ID"
                   className="w-full pl-10 pr-4 py-3 bg-muted/50 rounded-lg outline-none focus:ring-2 focus:ring-primary border border-transparent focus:border-primary transition-all"
                   required={session?.formConfig.requireIdNumber}
                 />
               </div>
+            </div>
+          )}
+
+          {/* Auto-ID notice for exhibitor / attendee */}
+          {isAutoId && (
+            <div className="flex items-start gap-3 bg-primary/5 border border-primary/20 rounded-lg px-4 py-3">
+              <Hash className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Your <span className="font-bold text-foreground">
+                  {role === 'exhibitor' ? 'Exhibition ID' : 'Registration ID'}
+                </span> will be automatically generated after you submit.
+              </p>
             </div>
           )}
 
@@ -228,14 +311,14 @@ export function CheckIn() {
 
           {/* Error Messages */}
           {status === 'duplicate' && (
-            <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg">
-              Already checked in
+            <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm font-medium">
+              ⚠️ Already registered — this ID is already in the system.
             </div>
           )}
 
           {status === 'error' && (
-            <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg">
-              Please fill in all fields
+            <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg text-sm font-medium">
+              ⚠️ Please fill in all required fields.
             </div>
           )}
 
@@ -243,9 +326,9 @@ export function CheckIn() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full bg-primary text-primary-foreground py-3 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="w-full bg-primary text-primary-foreground py-3 rounded-lg font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            {isSubmitting ? 'Checking In...' : 'CHECK-IN'}
+            {isSubmitting ? 'Submitting...' : 'REGISTER / CHECK-IN'}
           </button>
         </form>
 
