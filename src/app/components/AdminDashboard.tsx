@@ -3,6 +3,8 @@ import { QRCodeSVG } from 'qrcode.react';
 import { utils, writeFile } from 'xlsx';
 import { attendanceService } from '../services/attendanceService';
 import { AttendeeRecord, SessionData, SessionType, UserRole } from '../types';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 import {
   Download,
@@ -17,7 +19,10 @@ import {
   Settings,
   Lock,
   ExternalLink,
-  ChevronLeft
+  ChevronLeft,
+  FileText,
+  Table as TableIcon,
+  FileSpreadsheet
 } from 'lucide-react';
 
 export function AdminDashboard() {
@@ -148,13 +153,72 @@ export function AdminDashboard() {
     }
   };
 
-  const handleExport = (session: SessionData) => {
+  const handleExportExcel = (session: SessionData) => {
     const data = attendanceService.getExportData(session.id);
     const ws = utils.json_to_sheet(data);
     const wb = utils.book_new();
     utils.book_append_sheet(wb, ws, 'Attendance');
     const timestamp = new Date().toISOString().split('T')[0];
     writeFile(wb, `${session.name.replace(/\s+/g, '_')}_${timestamp}.xlsx`);
+  };
+
+  const handleExportCSV = (session: SessionData) => {
+    const data = attendanceService.getExportData(session.id);
+    const ws = utils.json_to_sheet(data);
+    const csv = utils.sheet_to_csv(ws);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().split('T')[0];
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${session.name.replace(/\s+/g, '_')}_${timestamp}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportPDF = (session: SessionData) => {
+    const doc = new jsPDF();
+    const data = attendanceService.getExportData(session.id);
+    
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(40);
+    doc.text('Attendance Report', 14, 22);
+    
+    doc.setFontSize(14);
+    doc.setTextColor(60);
+    doc.text(session.name, 14, 30);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on ${new Date().toLocaleString()}`, 14, 38);
+    doc.text(`Session ID: ${session.id}`, 14, 44);
+    
+    // Table
+    const tableData = data.map((row: any, index: number) => [
+      index + 1,
+      row.Name,
+      row.Role,
+      row.Time,
+      row['ID Number'],
+      row['Booth Info'] || '-'
+    ]);
+
+    autoTable(doc, {
+      startY: 50,
+      head: [['S/N', 'Name', 'Role', 'Time', 'ID Number', 'Details']],
+      body: tableData,
+      theme: 'striped',
+      headStyles: { fillColor: [79, 70, 229], fontSize: 10 },
+      bodyStyles: { fontSize: 9 },
+      alternateRowStyles: { fillColor: [245, 247, 250] },
+      margin: { top: 50 }
+    });
+
+    const timestamp = new Date().toISOString().split('T')[0];
+    doc.save(`${session.name.replace(/\s+/g, '_')}_${timestamp}.pdf`);
   };
 
   if (!isAuthenticated) {
@@ -417,19 +481,41 @@ export function AdminDashboard() {
                 <ChevronLeft className="w-4 h-4" />
                 Back to all sessions
               </button>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => handleExport(selectedSession)}
-                  className="bg-card border border-border px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-muted transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  Export Data
-                </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-card border border-border rounded-lg p-1">
+                  <button 
+                    onClick={() => handleExportPDF(selectedSession)}
+                    className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-all flex items-center gap-2 text-xs font-bold"
+                    title="Export as PDF"
+                  >
+                    <FileText className="w-4 h-4" />
+                    PDF
+                  </button>
+                  <div className="w-[1px] h-4 bg-border mx-1" />
+                  <button 
+                    onClick={() => handleExportCSV(selectedSession)}
+                    className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-all flex items-center gap-2 text-xs font-bold"
+                    title="Export as CSV"
+                  >
+                    <TableIcon className="w-4 h-4" />
+                    CSV
+                  </button>
+                  <div className="w-[1px] h-4 bg-border mx-1" />
+                  <button 
+                    onClick={() => handleExportExcel(selectedSession)}
+                    className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-md transition-all flex items-center gap-2 text-xs font-bold"
+                    title="Export as Excel"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    Excel
+                  </button>
+                </div>
+
                 <a 
                   href={`${window.location.origin}/checkin/${selectedSession.id}`} 
                   target="_blank" 
                   rel="noreferrer"
-                  className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-all"
+                  className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-all shadow-sm"
                 >
                   <ExternalLink className="w-4 h-4" />
                   Open Form
