@@ -1,12 +1,16 @@
-import { Routes, Route, Navigate } from 'react-router';
+import { Routes, Route } from 'react-router';
 import { AdminDashboard } from './components/AdminDashboard';
 import { CheckIn } from './components/CheckIn';
 import { ExhibitorDirectory } from './components/ExhibitorDirectory';
+import { Home } from './components/Home';
 
 export default function App() {
   return (
     <div className="relative">
       <Routes>
+        {/* Public Landing / Session Selection */}
+        <Route path="/" element={<Home />} />
+        
         {/* Admin Flow */}
         <Route path="/admin" element={<AdminDashboard />} />
         
@@ -16,9 +20,6 @@ export default function App() {
         
         {/* Directory/Public Flow */}
         <Route path="/directory" element={<ExhibitorDirectory />} />
-        
-        {/* Default Route */}
-        <Route path="/" element={<Navigate to="/checkin" replace />} />
       </Routes>
     </div>
   );
