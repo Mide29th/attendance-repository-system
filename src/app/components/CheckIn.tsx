@@ -36,36 +36,40 @@ export function CheckIn() {
   const isAutoId = AUTO_ID_ROLES.includes(role);
 
   useEffect(() => {
-    if (sessionId) {
-      // Check for sync data in URL if session not found locally
-      const params = new URLSearchParams(window.location.search);
-      const syncData = params.get('s');
-      if (syncData) {
-        attendanceService.importSession(syncData, sessionId);
-      }
+    const initSession = async () => {
+      if (sessionId) {
+        // Check for sync data in URL if session not found locally
+        const params = new URLSearchParams(window.location.search);
+        const syncData = params.get('s');
+        if (syncData) {
+          await attendanceService.importSession(syncData);
+        }
 
-      // Load the specific session from the URL
-      const activeSession = attendanceService.getSession(sessionId);
-      if (activeSession) {
-        setSession(activeSession);
-        if (activeSession.formConfig.allowedRoles.length > 0) {
-          setRole(activeSession.formConfig.allowedRoles[0]);
+        // Load the specific session from Supabase
+        const activeSession = await attendanceService.getSession(sessionId);
+        if (activeSession) {
+          setSession(activeSession);
+          if (activeSession.formConfig.allowedRoles.length > 0) {
+            setRole(activeSession.formConfig.allowedRoles[0]);
+          }
+        } else {
+          setStatus('invalid_session');
         }
       } else {
-        setStatus('invalid_session');
-      }
-    } else {
-      // No sessionId in URL — auto-load the first active session
-      const allSessions = attendanceService.getSessions();
-      const activeSession = allSessions.find(s => s.isActive);
-      if (activeSession) {
-        setSession(activeSession);
-        if (activeSession.formConfig.allowedRoles.length > 0) {
-          setRole(activeSession.formConfig.allowedRoles[0]);
+        // No sessionId in URL — auto-load the first active session from cache
+        const allSessions = attendanceService.getSessions();
+        const activeSession = allSessions.find(s => s.isActive);
+        if (activeSession) {
+          setSession(activeSession);
+          if (activeSession.formConfig.allowedRoles.length > 0) {
+            setRole(activeSession.formConfig.allowedRoles[0]);
+          }
         }
+        // If no sessions exist yet, the form still renders as General Check-In
       }
-      // If no sessions exist yet, the form still renders as General Check-In
-    }
+    };
+
+    initSession();
   }, [sessionId]);
 
 
@@ -109,7 +113,7 @@ export function CheckIn() {
     // Auto-generate ID for exhibitor and attendee roles
     const finalId = isAutoId ? generateId(role) : idNumber.trim();
 
-    const success = attendanceService.addAttendee(
+    const success = await attendanceService.addAttendee(
       sessionId || session?.id || 'default',
       name.trim(),
       role,

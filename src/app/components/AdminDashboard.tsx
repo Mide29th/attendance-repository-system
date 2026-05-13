@@ -60,6 +60,7 @@ export function AdminDashboard() {
 
   // Load data
   useEffect(() => {
+    attendanceService.refreshCache();
     loadData();
     const unsubscribe = attendanceService.subscribe(loadData);
 
@@ -89,7 +90,7 @@ export function AdminDashboard() {
     }
   };
 
-  const handleCreateSession = (e: React.FormEvent) => {
+  const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault();
     console.log('handleCreateSession: started', { newSessionName, newSessionType, allowedRoles });
     
@@ -104,19 +105,22 @@ export function AdminDashboard() {
     
     try {
       console.log('handleCreateSession: calling attendanceService.createSession');
-      const newSession = attendanceService.createSession(newSessionName.trim(), newSessionType, {
+      const newSession = await attendanceService.createSession(newSessionName.trim(), newSessionType, {
         allowedRoles,
         requireIdNumber,
         collectBoothInfo
       });
       
       console.log('handleCreateSession: session created', newSession);
-      setSelectedSessionId(newSession.id);
-      setIsCreating(false);
-      setNewSessionName('');
-      setAllowedRoles(['student', 'lecturer', 'exhibitor', 'attendee']);
-      setRequireIdNumber(true);
-      setCollectBoothInfo(true);
+      if (newSession) {
+        setSelectedSessionId(newSession.id);
+        setIsCreating(false);
+        setNewSessionName('');
+        setAllowedRoles(['student', 'lecturer', 'exhibitor', 'attendee']);
+        setRequireIdNumber(true);
+        setCollectBoothInfo(true);
+        loadData();
+      }
       console.log('handleCreateSession: state updated');
     } catch (error) {
       console.error('handleCreateSession: failed', error);
@@ -125,14 +129,14 @@ export function AdminDashboard() {
   };
 
 
-  const handleUpdateSessionConfig = (e: React.FormEvent) => {
+  const handleUpdateSessionConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSession || !editSessionName.trim() || allowedRoles.length === 0) {
       if (allowedRoles.length === 0) alert('Please select at least one allowed role.');
       return;
     }
 
-    const updated = attendanceService.updateSession(selectedSession.id, {
+    const updated = await attendanceService.updateSession(selectedSession.id, {
       name: editSessionName.trim(),
       type: editSessionType,
       formConfig: {
@@ -158,16 +162,16 @@ export function AdminDashboard() {
     setIsEditingConfig(true);
   };
 
-  const handleDeleteSession = (id: string) => {
+  const handleDeleteSession = async (id: string) => {
 
     if (confirm('Are you sure you want to delete this session? All attendee data for this session will be lost.')) {
-      attendanceService.deleteSession(id);
+      await attendanceService.deleteSession(id);
       if (selectedSessionId === id) setSelectedSessionId(null);
     }
   };
 
-  const handleExportExcel = (session: SessionData) => {
-    const data = attendanceService.getExportData(session.id);
+  const handleExportExcel = async (session: SessionData) => {
+    const data = await attendanceService.getExportData(session.id);
     const ws = utils.json_to_sheet(data);
     const wb = utils.book_new();
     utils.book_append_sheet(wb, ws, 'Attendance');
@@ -175,8 +179,8 @@ export function AdminDashboard() {
     writeFile(wb, `${session.name.replace(/\s+/g, '_')}_${timestamp}.xlsx`);
   };
 
-  const handleExportCSV = (session: SessionData) => {
-    const data = attendanceService.getExportData(session.id);
+  const handleExportCSV = async (session: SessionData) => {
+    const data = await attendanceService.getExportData(session.id);
     const ws = utils.json_to_sheet(data);
     const csv = utils.sheet_to_csv(ws);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -191,9 +195,9 @@ export function AdminDashboard() {
     document.body.removeChild(link);
   };
 
-  const handleExportPDF = (session: SessionData) => {
+  const handleExportPDF = async (session: SessionData) => {
     const doc = new jsPDF();
-    const data = attendanceService.getExportData(session.id);
+    const data = await attendanceService.getExportData(session.id);
     
     // Header
     doc.setFontSize(20);
@@ -234,23 +238,23 @@ export function AdminDashboard() {
     doc.save(`${session.name.replace(/\s+/g, '_')}_${timestamp}.pdf`);
   };
 
-  const handleClearAllData = () => {
-    const confirmed = window.confirm('CRITICAL WARNING: This will permanently delete ALL sessions and ALL attendee records from your device. This action CANNOT be undone.\n\nAre you absolutely sure you want to wipe the system?');
+  const handleClearAllData = async () => {
+    const confirmed = window.confirm('CRITICAL WARNING: This will permanently delete ALL sessions and ALL attendee records from the database. This action CANNOT be undone.\n\nAre you absolutely sure you want to wipe the system?');
     
     if (confirmed) {
       const doubleCheck = window.confirm('LAST CHANCE: Are you really sure? Everything will be lost.');
       if (doubleCheck) {
-        attendanceService.clearAllData();
+        await attendanceService.clearAllData();
         setSelectedSessionId(null);
         alert('Database cleared successfully.');
       }
     }
   };
 
-  const handleDeleteAttendee = (attendeeId: string) => {
+  const handleDeleteAttendee = async (attendeeId: string) => {
     if (!selectedSession) return;
     if (confirm('Are you sure you want to delete this record?')) {
-      attendanceService.deleteAttendee(selectedSession.id, attendeeId);
+      await attendanceService.deleteAttendee(selectedSession.id, attendeeId);
       // Data will refresh via the subscription
     }
   };
