@@ -236,6 +236,64 @@ class AttendanceService {
       this.saveSessions(sessions);
     }
   }
+
+  // Get synchronization data for a session (for QR codes)
+  getSyncData(sessionId: string): string | null {
+    const session = this.getSession(sessionId);
+    if (!session) return null;
+    
+    const syncObj = {
+      n: session.name,
+      t: session.type,
+      c: session.formConfig,
+      a: session.createdAt
+    };
+    
+    try {
+      const str = JSON.stringify(syncObj);
+      const bytes = new TextEncoder().encode(str);
+      let binString = "";
+      for (const byte of bytes) {
+        binString += String.fromCharCode(byte);
+      }
+      return btoa(binString);
+    } catch (e) {
+      console.error('Failed to encode sync data', e);
+      return null;
+    }
+  }
+
+  // Import a session from sync data
+  importSession(syncData: string, sessionId: string): SessionData | null {
+    try {
+      const binString = atob(syncData);
+      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0)!);
+      const str = new TextDecoder().decode(bytes);
+      const syncObj = JSON.parse(str);
+      
+      const sessions = this.getSessions();
+      if (sessions.some(s => s.id === sessionId)) {
+        return this.getSession(sessionId) || null;
+      }
+      
+      const newSession: SessionData = {
+        id: sessionId,
+        name: syncObj.n,
+        type: syncObj.t,
+        formConfig: syncObj.c,
+        createdAt: syncObj.a || new Date().toISOString(),
+        isActive: true,
+        attendees: []
+      };
+      
+      sessions.push(newSession);
+      this.saveSessions(sessions);
+      return newSession;
+    } catch (e) {
+      console.error('Failed to import session', e);
+      return null;
+    }
+  }
 }
 
 export const attendanceService = new AttendanceService();
