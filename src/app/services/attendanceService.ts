@@ -1,191 +1,238 @@
 import { AttendeeRecord, SessionData, SessionType, UserRole } from '../types';
-
-const SESSIONS_KEY = 'swift_attend_sessions';
-const OFFLINE_QUEUE_KEY = 'swift_attend_offline_queue';
+import { supabase } from '../lib/supabase';
 
 class AttendanceService {
   private listeners: Set<() => void> = new Set();
+  private sessionCache: SessionData[] = [];
 
   constructor() {
-    this.migrateLegacyData();
+    this.refreshCache();
   }
 
-  // Migrate from single session storage to multi-session
-  private migrateLegacyData(): void {
-    const legacy = localStorage.getItem('swift_attend_session');
-    if (legacy) {
-      try {
-        const session = JSON.parse(legacy);
-        // Map old structure to new structure if needed
-        const migrated: SessionData = {
-          id: session.sessionId || session.id || this.generateId(),
-          name: 'Default Session',
-          type: 'check-in',
-          createdAt: session.createdAt || new Date().toISOString(),
-          isActive: true,
-          formConfig: {
-            allowedRoles: ['student', 'lecturer', 'exhibitor', 'attendee'],
-            requireIdNumber: true,
-            collectBoothInfo: true
-          },
-          attendees: session.attendees.map((a: any) => ({
+  // Refresh local cache from Supabase
+  async refreshCache(): Promise<void> {
+    try {
+      const { data: sessions, error: sessionError } = await supabase
+        .from('sessions')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-            ...a,
-            sessionId: session.sessionId || session.id || 'default'
+      if (sessionError) throw sessionError;
+
+      const fullSessions: SessionData[] = await Promise.all((sessions || []).map(async (s: any) => {
+        const { data: attendees, error: attendeeError } = await supabase
+          .from('attendees')
+          .select('*')
+          .eq('session_id', s.id);
+
+        if (attendeeError) throw attendeeError;
+
+        return {
+          id: s.id,
+          name: s.name,
+          type: s.type,
+          slug: s.slug,
+          createdAt: s.created_at,
+          isActive: true,
+          formConfig: s.form_config,
+          attendees: (attendees || []).map((a: any) => ({
+            id: a.id,
+            sessionId: a.session_id,
+            name: a.data.name,
+            role: a.data.role,
+            idNumber: a.data.idNumber,
+            timestamp: a.timestamp,
+            synced: true,
+            boothNumber: a.data.boothNumber,
+            category: a.data.category
           }))
         };
-        this.saveSessions([migrated]);
-        localStorage.removeItem('swift_attend_session');
-      } catch (e) {
-        console.error('Failed to migrate legacy data', e);
-      }
+      }));
+
+      this.sessionCache = fullSessions;
+      this.notifyListeners();
+    } catch (e) {
+      console.error('Failed to refresh attendance cache from Supabase', e);
     }
   }
 
-  // Get all sessions
+  // Update existing session
+  async updateSession(sessionId: string, updates: Partial<SessionData>): Promise<SessionData | undefined> {
+    try {
+      const { data, error } = await supabase
+        .from('sessions')
+        .update({
+          name: updates.name,
+          type: updates.type,
+          form_config: updates.formConfig
+        })
+        .eq('id', sessionId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await this.refreshCache();
+      return this.sessionCache.find(s => s.id === sessionId);
+    } catch (e) {
+      console.error('Failed to update session in Supabase', e);
+      return undefined;
+    }
+  }
+
+  // Save all sessions to localStorage - DEPRECATED
+  private saveSessions(sessions: SessionData[]): void {
+    // We now use Supabase, but keeping notify for cache updates
+    this.notifyListeners();
+  }
+
+  // Get all sessions (from cache)
   getSessions(): SessionData[] {
-    const stored = localStorage.getItem(SESSIONS_KEY);
-    return stored ? JSON.parse(stored) : [];
+    return this.sessionCache;
   }
 
-  // Get specific session
-  getSession(id: string): SessionData | undefined {
-    return this.getSessions().find(s => s.id === id);
+  // Get specific session (from cache or DB)
+  async getSession(id: string): Promise<SessionData | undefined> {
+    // Try cache first
+    const cached = this.sessionCache.find(s => s.id === id);
+    if (cached) return cached;
+
+    // Fetch from DB if not in cache
+    try {
+      const { data: s, error: sessionError } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (sessionError || !s) return undefined;
+
+      const { data: attendees, error: attendeeError } = await supabase
+        .from('attendees')
+        .select('*')
+        .eq('session_id', s.id);
+
+      if (attendeeError) throw attendeeError;
+
+      return {
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        slug: s.slug,
+        createdAt: s.created_at,
+        isActive: true,
+        formConfig: s.form_config,
+        attendees: (attendees || []).map((a: any) => ({
+          id: a.id,
+          sessionId: a.session_id,
+          name: a.data.name,
+          role: a.data.role,
+          idNumber: a.data.idNumber,
+          timestamp: a.timestamp,
+          synced: true,
+          boothNumber: a.data.boothNumber,
+          category: a.data.category
+        }))
+      };
+    } catch (e) {
+      console.error('Failed to fetch session from Supabase', e);
+      return undefined;
+    }
   }
 
-  // Create new session with form config
-  createSession(name: string, type: SessionType, formConfig?: SessionData['formConfig']): SessionData {
-
-    const sessions = this.getSessions();
+  // Create new session
+  async createSession(name: string, type: SessionType, formConfig?: SessionData['formConfig']): Promise<SessionData | null> {
     const slug = name.toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
     
-    const id = `${slug}-${Math.random().toString(36).substr(2, 5)}`;
-    
-    const newSession: SessionData = {
-      id,
-      name,
-      type,
-      createdAt: new Date().toISOString(),
-      isActive: true,
-      formConfig: formConfig || {
-        allowedRoles: ['student', 'lecturer', 'exhibitor', 'attendee'],
-        requireIdNumber: true,
-        collectBoothInfo: true
-      },
-      attendees: []
+    const config = formConfig || {
+      allowedRoles: ['student', 'lecturer', 'exhibitor', 'attendee'],
+      requireIdNumber: true,
+      collectBoothInfo: true
     };
-    sessions.push(newSession);
-    this.saveSessions(sessions);
-    return newSession;
+
+    try {
+      const { data, error } = await supabase
+        .from('sessions')
+        .insert([{
+          name,
+          type,
+          slug: `${slug}-${Math.random().toString(36).substr(2, 5)}`,
+          form_config: config
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const newSession: SessionData = {
+        id: data.id,
+        name: data.name,
+        type: data.type,
+        slug: data.slug,
+        createdAt: data.created_at,
+        isActive: true,
+        formConfig: data.form_config,
+        attendees: []
+      };
+
+      this.sessionCache.unshift(newSession);
+      this.notifyListeners();
+      return newSession;
+    } catch (e) {
+      console.error('Failed to create session in Supabase', e);
+      return null;
+    }
   }
 
-  // Update existing session
-
-  updateSession(sessionId: string, updates: Partial<SessionData>): SessionData | undefined {
-    let sessions = this.getSessions();
-    const index = sessions.findIndex(s => s.id === sessionId);
-    if (index === -1) return undefined;
-
-    sessions[index] = { ...sessions[index], ...updates };
-    this.saveSessions(sessions);
-    return sessions[index];
-  }
-
-
-
-
-  // Save all sessions to localStorage
-  private saveSessions(sessions: SessionData[]): void {
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-    this.notifyListeners();
-  }
-
-  private generateId(): string {
-    return `id-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  // Check if attendee already exists in a session
-  isDuplicate(sessionId: string, idNumber: string): boolean {
-    const session = this.getSession(sessionId);
-    if (!session) return false;
-    return session.attendees.some(a => a.idNumber === idNumber);
-  }
-
-  // Add new attendee to a specific session
-  addAttendee(
+  // Add new attendee
+  async addAttendee(
     sessionId: string,
     name: string, 
     role: UserRole, 
     idNumber: string,
     boothNumber?: string,
     category?: string
-  ): boolean {
-    const session = this.getSession(sessionId);
-    if (!session || this.isDuplicate(sessionId, idNumber)) {
+  ): Promise<boolean> {
+    try {
+      // Check for duplicate in DB
+      const { data: existing, error: checkError } = await supabase
+        .from('attendees')
+        .select('id')
+        .eq('session_id', sessionId)
+        .filter('data->>idNumber', 'eq', idNumber)
+        .limit(1);
+
+      if (checkError) throw checkError;
+      if (existing && existing.length > 0) return false;
+
+      const { error } = await supabase
+        .from('attendees')
+        .insert([{
+          session_id: sessionId,
+          data: {
+            name,
+            role,
+            idNumber,
+            boothNumber,
+            category
+          }
+        }]);
+
+      if (error) throw error;
+
+      await this.refreshCache(); // Sync local cache
+      return true;
+    } catch (e) {
+      console.error('Failed to add attendee to Supabase', e);
       return false;
     }
-
-    const newAttendee: AttendeeRecord = {
-      id: this.generateId(),
-      sessionId,
-      name,
-      role,
-      idNumber,
-      boothNumber,
-      category,
-      timestamp: new Date().toISOString(),
-      synced: navigator.onLine
-    };
-
-    const sessions = this.getSessions();
-    const sessionIndex = sessions.findIndex(s => s.id === sessionId);
-    if (sessionIndex !== -1) {
-      sessions[sessionIndex].attendees.push(newAttendee);
-      this.saveSessions(sessions);
-    }
-
-    // If offline, add to queue
-    if (!navigator.onLine) {
-      this.addToOfflineQueue(newAttendee);
-    }
-
-    return true;
   }
 
-  // Offline queue management
-  private addToOfflineQueue(attendee: AttendeeRecord): void {
-    const queue = this.getOfflineQueue();
-    queue.push(attendee);
-    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-  }
-
-  private getOfflineQueue(): AttendeeRecord[] {
-    const stored = localStorage.getItem(OFFLINE_QUEUE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  }
-
-  // Sync offline data
+  // Sync offline data - Placeholder as Supabase handles some of this, but we can implement specific logic if needed
   async syncOfflineData(): Promise<void> {
-    const queue = this.getOfflineQueue();
-    if (queue.length === 0) return;
-
-    const sessions = this.getSessions();
-    
-    // Mark items as synced in sessions
-    queue.forEach(queuedItem => {
-      const session = sessions.find(s => s.id === queuedItem.sessionId);
-      if (session) {
-        const attendee = session.attendees.find(a => a.id === queuedItem.id);
-        if (attendee) {
-          attendee.synced = true;
-        }
-      }
-    });
-
-    this.saveSessions(sessions);
-    localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    await this.refreshCache();
   }
 
   // Subscribe to changes
@@ -199,14 +246,25 @@ class AttendanceService {
   }
 
   // Delete session
-  deleteSession(id: string): void {
-    const sessions = this.getSessions().filter(s => s.id !== id);
-    this.saveSessions(sessions);
+  async deleteSession(id: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('sessions')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      
+      this.sessionCache = this.sessionCache.filter(s => s.id !== id);
+      this.notifyListeners();
+    } catch (e) {
+      console.error('Failed to delete session from Supabase', e);
+    }
   }
 
   // Export session data
-  getExportData(sessionId: string): any[] {
-    const session = this.getSession(sessionId);
+  async getExportData(sessionId: string): Promise<any[]> {
+    const session = await this.getSession(sessionId);
     if (!session) return [];
     
     return session.attendees.map((a, index) => ({
@@ -221,42 +279,47 @@ class AttendanceService {
   }
 
   // Clear all data (Danger Zone)
-  clearAllData(): void {
-    localStorage.removeItem(SESSIONS_KEY);
-    localStorage.removeItem(OFFLINE_QUEUE_KEY);
-    this.notifyListeners();
-  }
-
-  // Delete specific attendee from a session
-  deleteAttendee(sessionId: string, attendeeId: string): void {
-    const sessions = this.getSessions();
-    const sessionIndex = sessions.findIndex(s => s.id === sessionId);
-    if (sessionIndex !== -1) {
-      sessions[sessionIndex].attendees = sessions[sessionIndex].attendees.filter(a => a.id !== attendeeId);
-      this.saveSessions(sessions);
+  async clearAllData(): Promise<void> {
+    try {
+      const { error } = await supabase.from('sessions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+      this.sessionCache = [];
+      this.notifyListeners();
+    } catch (e) {
+      console.error('Failed to clear data from Supabase', e);
     }
   }
 
-  // Get synchronization data for a session (for QR codes)
+  // Delete specific attendee
+  async deleteAttendee(sessionId: string, attendeeId: string): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('attendees')
+        .delete()
+        .eq('id', attendeeId);
+
+      if (error) throw error;
+      await this.refreshCache();
+    } catch (e) {
+      console.error('Failed to delete attendee from Supabase', e);
+    }
+  }
+
+  // Get synchronization data (QR codes)
   getSyncData(sessionId: string): string | null {
-    const session = this.getSession(sessionId);
+    const session = this.sessionCache.find(s => s.id === sessionId);
     if (!session) return null;
     
+    // With Supabase, the sync data is just the Session ID because the device will fetch the rest from DB
     const syncObj = {
+      i: session.id, // ID
       n: session.name,
       t: session.type,
-      c: session.formConfig,
-      a: session.createdAt
+      c: session.formConfig
     };
     
     try {
-      const str = JSON.stringify(syncObj);
-      const bytes = new TextEncoder().encode(str);
-      let binString = "";
-      for (const byte of bytes) {
-        binString += String.fromCharCode(byte);
-      }
-      return btoa(binString);
+      return btoa(JSON.stringify(syncObj));
     } catch (e) {
       console.error('Failed to encode sync data', e);
       return null;
@@ -264,31 +327,26 @@ class AttendanceService {
   }
 
   // Import a session from sync data
-  importSession(syncData: string, sessionId: string): SessionData | null {
+  async importSession(syncData: string): Promise<SessionData | null> {
     try {
-      const binString = atob(syncData);
-      const bytes = Uint8Array.from(binString, (m) => m.codePointAt(0)!);
-      const str = new TextDecoder().decode(bytes);
-      const syncObj = JSON.parse(str);
+      const syncObj = JSON.parse(atob(syncData));
+      const sessionId = syncObj.i;
       
-      const sessions = this.getSessions();
-      if (sessions.some(s => s.id === sessionId)) {
-        return this.getSession(sessionId) || null;
-      }
-      
-      const newSession: SessionData = {
+      const existing = await this.getSession(sessionId);
+      if (existing) return existing;
+
+      // If not in DB, it might be a temporary session or we need to create it
+      // But usually, it should exist in DB if generated by an admin.
+      // We return the metadata from syncObj as fallback if DB fails
+      return {
         id: sessionId,
         name: syncObj.n,
         type: syncObj.t,
         formConfig: syncObj.c,
-        createdAt: syncObj.a || new Date().toISOString(),
+        createdAt: new Date().toISOString(),
         isActive: true,
         attendees: []
       };
-      
-      sessions.push(newSession);
-      this.saveSessions(sessions);
-      return newSession;
     } catch (e) {
       console.error('Failed to import session', e);
       return null;
@@ -297,3 +355,4 @@ class AttendanceService {
 }
 
 export const attendanceService = new AttendanceService();
+
