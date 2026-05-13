@@ -23,15 +23,16 @@ import {
   FileText,
   Table as TableIcon,
   FileSpreadsheet,
-  AlertTriangle,
-  Trash2
+  AlertTriangle
 } from 'lucide-react';
 
 export function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [sessions, setSessions] = useState<SessionData[]>([]);
-  const [selectedSession, setSelectedSession] = useState<SessionData | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const selectedSession = sessions.find(s => s.id === selectedSessionId) || null;
+
   const [isCreating, setIsCreating] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const [newSessionType, setNewSessionType] = useState<SessionType>('check-in');
@@ -54,10 +55,6 @@ export function AdminDashboard() {
   const loadData = () => {
     const allSessions = attendanceService.getSessions();
     setSessions(allSessions);
-    if (selectedSession) {
-      const updated = allSessions.find(s => s.id === selectedSession.id);
-      if (updated) setSelectedSession(updated);
-    }
     setLastUpdate(new Date());
   };
 
@@ -80,7 +77,7 @@ export function AdminDashboard() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [selectedSession]);
+  }, []);
 
 
   const handleLogin = (e: React.FormEvent) => {
@@ -94,22 +91,37 @@ export function AdminDashboard() {
 
   const handleCreateSession = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSessionName.trim() || allowedRoles.length === 0) {
-      if (allowedRoles.length === 0) alert('Please select at least one allowed role.');
+    console.log('handleCreateSession: started', { newSessionName, newSessionType, allowedRoles });
+    
+    if (!newSessionName.trim()) {
+      alert('Please enter a session name.');
+      return;
+    }
+    if (allowedRoles.length === 0) {
+      alert('Please select at least one allowed role.');
       return;
     }
     
-    const newSession = attendanceService.createSession(newSessionName.trim(), newSessionType, {
-      allowedRoles,
-      requireIdNumber,
-      collectBoothInfo
-    });
-    setSelectedSession(newSession);
-    setIsCreating(false);
-    setNewSessionName('');
-    setAllowedRoles(['student', 'lecturer', 'exhibitor', 'attendee']);
-    setRequireIdNumber(true);
-    setCollectBoothInfo(true);
+    try {
+      console.log('handleCreateSession: calling attendanceService.createSession');
+      const newSession = attendanceService.createSession(newSessionName.trim(), newSessionType, {
+        allowedRoles,
+        requireIdNumber,
+        collectBoothInfo
+      });
+      
+      console.log('handleCreateSession: session created', newSession);
+      setSelectedSessionId(newSession.id);
+      setIsCreating(false);
+      setNewSessionName('');
+      setAllowedRoles(['student', 'lecturer', 'exhibitor', 'attendee']);
+      setRequireIdNumber(true);
+      setCollectBoothInfo(true);
+      console.log('handleCreateSession: state updated');
+    } catch (error) {
+      console.error('handleCreateSession: failed', error);
+      alert('Failed to create session: ' + (error instanceof Error ? error.message : String(error)));
+    }
   };
 
 
@@ -131,7 +143,6 @@ export function AdminDashboard() {
     });
 
     if (updated) {
-      setSelectedSession(updated);
       setIsEditingConfig(false);
       loadData();
     }
@@ -151,7 +162,7 @@ export function AdminDashboard() {
 
     if (confirm('Are you sure you want to delete this session? All attendee data for this session will be lost.')) {
       attendanceService.deleteSession(id);
-      if (selectedSession?.id === id) setSelectedSession(null);
+      if (selectedSessionId === id) setSelectedSessionId(null);
     }
   };
 
@@ -230,7 +241,7 @@ export function AdminDashboard() {
       const doubleCheck = window.confirm('LAST CHANCE: Are you really sure? Everything will be lost.');
       if (doubleCheck) {
         attendanceService.clearAllData();
-        setSelectedSession(null);
+        setSelectedSessionId(null);
         alert('Database cleared successfully.');
       }
     }
@@ -490,7 +501,7 @@ export function AdminDashboard() {
                     </div>
 
                     <button 
-                      onClick={() => setSelectedSession(session)}
+                      onClick={() => setSelectedSessionId(session.id)}
                       className="w-full bg-muted hover:bg-primary hover:text-primary-foreground text-foreground py-2 rounded-lg font-medium transition-all flex items-center justify-center gap-2"
                     >
                       View Details
@@ -506,7 +517,7 @@ export function AdminDashboard() {
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <button 
-                onClick={() => setSelectedSession(null)}
+                onClick={() => setSelectedSessionId(null)}
                 className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
                 style={{ width: 'fit-content' }}
               >
@@ -544,10 +555,12 @@ export function AdminDashboard() {
                 </div>
 
                 <a 
-                  href={`${window.location.origin}/checkin/${selectedSession.id}`} 
+                  href={`${window.location.origin}/checkin/${selectedSession.id}${
+                    attendanceService.getSyncData(selectedSession.id) ? `?s=${attendanceService.getSyncData(selectedSession.id)}` : ''
+                  }`} 
                   target="_blank" 
                   rel="noreferrer"
-                  className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 hover:opacity-90 transition-all shadow-sm"
+                  className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary rounded-lg text-sm font-bold hover:bg-primary/20 transition-all"
                 >
                   <ExternalLink className="w-4 h-4" />
                   Open Form
@@ -717,7 +730,9 @@ export function AdminDashboard() {
                   </h3>
                   <div className="bg-white p-4 rounded-xl inline-block shadow-sm mb-2">
                     <QRCodeSVG 
-                      value={`${window.location.origin}/checkin/${selectedSession.id}`}
+                      value={`${window.location.origin}/checkin/${selectedSession.id}${
+                        attendanceService.getSyncData(selectedSession.id) ? `?s=${attendanceService.getSyncData(selectedSession.id)}` : ''
+                      }`}
                       size={180}
                       level="H"
                       includeMargin={true}

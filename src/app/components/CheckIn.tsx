@@ -37,6 +37,13 @@ export function CheckIn() {
 
   useEffect(() => {
     if (sessionId) {
+      // Check for sync data in URL if session not found locally
+      const params = new URLSearchParams(window.location.search);
+      const syncData = params.get('s');
+      if (syncData) {
+        attendanceService.importSession(syncData, sessionId);
+      }
+
       // Load the specific session from the URL
       const activeSession = attendanceService.getSession(sessionId);
       if (activeSession) {
@@ -63,13 +70,27 @@ export function CheckIn() {
 
 
   const categories = [
-    'Technology',
-    'Agriculture',
-    'Education',
-    'Healthcare',
-    'Finance',
-    'Retail',
-    'Other'
+    'WEB DEVELOPMENT',
+    'FASHION DESIGN (MALE)',
+    'FASHION DESIGN (FEMALE)',
+    'CATERING',
+    'BAKING',
+    '3D- EPOXY',
+    'AUTOGELE',
+    'BAG MAKING',
+    'BATIK',
+    'BASIC FARMING/AGRO-ALLIED',
+    'BEAD-HAT MAKING',
+    'HAIRDRESSING',
+    'GRAPHICS DESIGN',
+    'DIGITAL MARKETING',
+    'CLEANING AGENTS',
+    'PHOTOGRAPHY',
+    'MAKEUP',
+    'PAINT PRODUCTION',
+    'INTERIOR DÉCOR',
+    'VIDEOGRAPHY',
+    'SHOE MAKING'
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
